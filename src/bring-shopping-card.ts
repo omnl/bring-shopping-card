@@ -960,19 +960,21 @@ export class BringShoppingCard extends LitElement {
                   class="suggestion-item ${i === this._selectedSuggestion ? 'selected' : ''}"
                   @click=${() => this._handleSuggestionClick(item)}
                 >
-                  ${item.imageUrl && !this._failedImages.has(item.imageUrl)
-                    ? html`
-                        <img
-                          class="suggestion-img"
-                          src="${item.imageUrl}"
-                          alt=""
-                          @error=${() => {
-                            this._failedImages.add(item.imageUrl!);
-                            this.requestUpdate();
-                          }}
-                        />
-                      `
-                    : html`<span class="suggestion-initial" aria-hidden="true">${item.name.trim().charAt(0).toUpperCase() || '?'}</span>`}
+                  <span class="suggestion-image">
+                    ${item.imageUrl && !this._failedImages.has(item.imageUrl)
+                      ? html`
+                          <img
+                            class="suggestion-img"
+                            src="${item.imageUrl}"
+                            alt=""
+                            @error=${() => {
+                              this._failedImages.add(item.imageUrl!);
+                              this.requestUpdate();
+                            }}
+                          />
+                        `
+                      : html`<span class="suggestion-initial" aria-hidden="true">${item.name.trim().charAt(0).toUpperCase() || '?'}</span>`}
+                  </span>
                   <span class="suggestion-text">${item.name}</span>
                   ${item.category ? html`<span class="suggestion-category">${item.category}</span>` : nothing}
                 </div>

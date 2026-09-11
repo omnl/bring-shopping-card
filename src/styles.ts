@@ -7,22 +7,23 @@ import { css } from 'lit';
 
 export const cardStyles = css`
   :host {
-    /* HA theme variables with widget defaults as fallback */
-    --bring-bg-primary: var(--ha-card-background, var(--card-background-color, #0f1419));
-    --bring-bg-secondary: var(--secondary-background-color, #1a2027);
-    --bring-bg-tertiary: var(--primary-background-color, #242d38);
-    --bring-bg-hover: var(--state-icon-hover-background-color, #2d3848);
-    --bring-bg-card: var(--ha-card-background, #1e252d);
-    --bring-accent: var(--primary-color, #4fd1c5);
+    /* Keep the card visually stable across HA themes. Some themes expose
+       almost identical background variables, which makes the whole card grey. */
+    --bring-bg-primary: #0f1419;
+    --bring-bg-secondary: #1a2027;
+    --bring-bg-tertiary: #242d38;
+    --bring-bg-hover: #2d3848;
+    --bring-bg-card: #1e252d;
+    --bring-accent: #4fd1c5;
     --bring-accent-dim: rgba(79, 209, 197, 0.12);
     --bring-accent-glow: rgba(79, 209, 197, 0.35);
-    --bring-text-primary: var(--primary-text-color, #e8edf4);
-    --bring-text-secondary: var(--secondary-text-color, #8b99a8);
-    --bring-text-muted: var(--disabled-text-color, #5a6878);
-    --bring-success: var(--success-color, #48bb78);
-    --bring-error: var(--error-color, #fc8181);
-    --bring-warning: var(--warning-color, #f6ad55);
-    --bring-border: var(--divider-color, rgba(255, 255, 255, 0.06));
+    --bring-text-primary: #e8edf4;
+    --bring-text-secondary: #a9b4c0;
+    --bring-text-muted: #7f8d9c;
+    --bring-success: #48bb78;
+    --bring-error: #fc8181;
+    --bring-warning: #f6ad55;
+    --bring-border: rgba(255, 255, 255, 0.09);
     --bring-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
     --bring-radius: var(--ha-card-border-radius, 14px);
     --bring-radius-sm: 10px;
@@ -34,19 +35,16 @@ export const cardStyles = css`
     container: bring-card / inline-size;
   }
 
-  /* HA supplies its own variables. These fallbacks ensure an accessible light
-     card when the host exposes only the current theme state (e.g. development
-     previews and minimal HA themes). */
   :host([data-theme="light"]) {
-    --bring-bg-primary: var(--ha-card-background, var(--card-background-color, #ffffff));
-    --bring-bg-secondary: var(--secondary-background-color, #f8fafc);
-    --bring-bg-tertiary: var(--primary-background-color, #e9eef5);
-    --bring-bg-hover: var(--state-icon-hover-background-color, #e2e8f0);
-    --bring-bg-card: var(--ha-card-background, var(--card-background-color, #ffffff));
-    --bring-text-primary: var(--primary-text-color, #1f2937);
-    --bring-text-secondary: var(--secondary-text-color, #4b5563);
-    --bring-text-muted: var(--disabled-text-color, #4b5563);
-    --bring-border: var(--divider-color, #cbd5e1);
+    --bring-bg-primary: #ffffff;
+    --bring-bg-secondary: #f8fafc;
+    --bring-bg-tertiary: #e9eef5;
+    --bring-bg-hover: #e2e8f0;
+    --bring-bg-card: #ffffff;
+    --bring-text-primary: #1f2937;
+    --bring-text-secondary: #4b5563;
+    --bring-text-muted: #64748b;
+    --bring-border: #d7dee8;
     --bring-shadow: 0 4px 24px rgba(15, 23, 42, 0.12);
   }
 
@@ -276,7 +274,7 @@ export const cardStyles = css`
     border: 1px solid var(--bring-border);
     border-radius: var(--bring-radius-sm);
     margin-top: 4px;
-    max-height: 240px;
+    max-height: 320px;
     overflow-y: auto;
     z-index: 200;
     display: none;
@@ -288,12 +286,17 @@ export const cardStyles = css`
   }
 
   .suggestion-item {
-    padding: 10px 14px;
+    padding: 8px 12px;
     display: flex;
     align-items: center;
     gap: 12px;
     cursor: pointer;
     transition: background 0.15s ease;
+    border-bottom: 1px solid var(--bring-border);
+  }
+
+  .suggestion-item:last-child {
+    border-bottom: 0;
   }
 
   .suggestion-item:hover,
@@ -301,11 +304,22 @@ export const cardStyles = css`
     background: var(--bring-bg-hover);
   }
 
+  .suggestion-image {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--bring-item-selectable);
+  }
+
   .suggestion-img {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     object-fit: contain;
-    border-radius: 4px;
+    filter: brightness(0) invert(1) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.12));
   }
 
   .suggestion-icon {
@@ -316,13 +330,22 @@ export const cardStyles = css`
 
   .suggestion-text {
     flex: 1;
+    min-width: 0;
     font-size: 14px;
     color: var(--bring-text-primary);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .suggestion-category {
     font-size: 11px;
-    color: var(--bring-text-muted);
+    color: var(--bring-text-secondary);
+    background: var(--bring-bg-tertiary);
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
   }
 
   .add-btn {
@@ -630,7 +653,7 @@ export const cardStyles = css`
 
   .card-initial { width: 28px; height: 28px; font-size: 24px; }
   .quick-card-initial { width: 28px; height: 28px; margin-bottom: 6px; font-size: 22px; }
-  .suggestion-initial { width: 28px; height: 28px; flex-shrink: 0; font-size: 20px; color: var(--bring-text-primary); }
+  .suggestion-initial { width: 28px; height: 28px; flex-shrink: 0; font-size: 20px; color: #ffffff; }
 
   :host([data-size="small"]) .card-initial { width: 24px; height: 24px; font-size: 20px; }
   :host([data-size="large"]) .card-initial { width: 40px; height: 40px; font-size: 32px; }
