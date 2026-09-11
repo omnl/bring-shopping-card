@@ -267,7 +267,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         """Mark an item as completed (move to recently)."""
         try:
             await self.bring.complete_item(list_uuid, item_name)
-            await self.async_request_refresh()
+            self.hass.async_create_task(self.async_request_refresh())
             return True
         except Exception as err:
             _LOGGER.error("Failed to complete item %s: %s", item_name, err)
