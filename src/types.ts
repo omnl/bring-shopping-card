@@ -51,6 +51,9 @@ export interface HomeAssistant {
     darkMode: boolean;
   };
   language: string;
+  locale?: {
+    language?: string;
+  };
 }
 
 // WebSocket response types

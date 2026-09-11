@@ -32,6 +32,22 @@ export const cardStyles = css`
     container: bring-card / inline-size;
   }
 
+  /* HA supplies its own variables. These fallbacks ensure an accessible light
+     card when the host exposes only the current theme state (e.g. development
+     previews and minimal HA themes). */
+  :host([data-theme="light"]) {
+    --bring-bg-primary: var(--ha-card-background, var(--card-background-color, #ffffff));
+    --bring-bg-secondary: var(--secondary-background-color, #f8fafc);
+    --bring-bg-tertiary: var(--primary-background-color, #e9eef5);
+    --bring-bg-hover: var(--state-icon-hover-background-color, #e2e8f0);
+    --bring-bg-card: var(--ha-card-background, var(--card-background-color, #ffffff));
+    --bring-text-primary: var(--primary-text-color, #1f2937);
+    --bring-text-secondary: var(--secondary-text-color, #4b5563);
+    --bring-text-muted: var(--disabled-text-color, #4b5563);
+    --bring-border: var(--divider-color, #cbd5e1);
+    --bring-shadow: 0 4px 24px rgba(15, 23, 42, 0.12);
+  }
+
   * {
     margin: 0;
     padding: 0;
@@ -60,53 +76,7 @@ export const cardStyles = css`
     gap: 10px 12px;
     min-width: 0;
     container: bring-header / inline-size;
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    /* The logo can shrink to its icon width, then the action row wraps below. */
-    flex: 1 1 0;
-    min-width: 46px;
-    overflow: hidden;
-  }
-
-  .logo-icon {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .logo-icon svg {
-    width: 100%;
-    height: 100%;
-    fill: var(--bring-accent);
-    filter: drop-shadow(0 2px 8px var(--bring-accent-glow));
-  }
-
-  .logo-text {
-    font-weight: 700;
-    font-size: 18px;
-    letter-spacing: -0.3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    /* Required for ellipsis to engage inside the flex row. */
-    min-width: 0;
-    color: var(--bring-text-primary);
-  }
-
-  .logo-text .accent {
-    color: var(--bring-accent);
-  }
-
-  .logo-text .subtitle {
-    color: #f6ad55;
-    font-weight: 600;
+    justify-content: flex-end;
   }
 
   .header-actions {
@@ -159,15 +129,16 @@ export const cardStyles = css`
     align-items: center;
     gap: 6px;
     width: auto;
-    padding: 8px 12px;
+    min-width: 150px;
+    padding: 10px 14px;
   }
 
   .list-btn-text {
-    max-width: 80px;
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .list-btn svg {
@@ -188,15 +159,15 @@ export const cardStyles = css`
     border: 1px solid var(--bring-border);
     border-radius: var(--bring-radius-sm);
     padding: 6px;
-    min-width: 150px;
-    max-width: min(220px, calc(100vw - 24px));
+    min-width: 230px;
+    max-width: min(320px, calc(100vw - 24px));
     z-index: 100;
     box-shadow: var(--bring-shadow);
   }
 
   .list-option {
-    padding: 10px 14px;
-    font-size: 13px;
+    padding: 12px 16px;
+    font-size: 14px;
     color: var(--bring-text-secondary);
     cursor: pointer;
     border-radius: 6px;
@@ -375,10 +346,14 @@ export const cardStyles = css`
     transform: scale(0.97);
   }
 
-  @container bring-card (max-width: 360px) {
-    .logo-text .subtitle {
-      display: none;
-    }
+  .add-btn:disabled {
+    background: var(--bring-bg-tertiary);
+    border: 1px solid var(--bring-border);
+    color: var(--bring-text-muted);
+    cursor: not-allowed;
+    opacity: 1;
+    filter: none;
+    box-shadow: none;
   }
 
   @container bring-card (max-width: 320px) {
@@ -417,16 +392,6 @@ export const cardStyles = css`
       zoom: 0.82;
     }
 
-    .logo-icon {
-      width: 32px;
-      height: 32px;
-    }
-
-    .logo {
-      min-width: 32px;
-    }
-
-    .logo-text,
     .list-btn-text {
       display: none;
     }
@@ -449,7 +414,6 @@ export const cardStyles = css`
         gap: 8px;
       }
 
-      .logo-text .subtitle,
       .list-btn-text {
         display: none;
       }
@@ -504,10 +468,34 @@ export const cardStyles = css`
     flex-shrink: 0;
   }
 
+  .section-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .clear-list-btn {
+    border: 1px solid var(--bring-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--bring-text-secondary);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .clear-list-btn { padding: 4px 8px; font-size: 11px; }
+  .clear-list-btn:hover { border-color: var(--bring-error); color: var(--bring-error); }
+  .clear-list-btn.confirm {
+    background: var(--bring-error);
+    border-color: var(--bring-error);
+    color: var(--bring-bg-primary);
+  }
+  .clear-list-btn:disabled { cursor: default; opacity: 0.45; }
+
   /* Cards Grid - sizes controlled by CSS vars */
   .cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--bring-card-width, 70px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--bring-card-width, 130px), 1fr));
     gap: 6px;
   }
 
@@ -522,29 +510,26 @@ export const cardStyles = css`
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
+    align-items: stretch;
+    text-align: left;
     min-height: var(--bring-card-height, 70px);
   }
 
   /* Size variants */
-  :host([data-size="small"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 4px; }
+  :host([data-size="small"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 4px; }
   :host([data-size="small"]) .card { padding: 6px 4px; min-height: 60px; }
   :host([data-size="small"]) .card-img { width: 24px; height: 24px; margin-bottom: 4px; }
   :host([data-size="small"]) .card-icon { font-size: 18px; margin-bottom: 4px; }
   :host([data-size="small"]) .card-name { font-size: 9px; }
-  :host([data-size="small"]) .card-check { width: 16px; height: 16px; top: 2px; right: 2px; }
-  :host([data-size="small"]) .card-check svg { width: 10px; height: 10px; }
-  :host([data-size="small"]) .card-drag { display: none; }
   :host([data-size="small"]) .card-spec { display: none; }
 
-  :host([data-size="medium"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; }
+  :host([data-size="medium"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
   :host([data-size="medium"]) .card { padding: 8px 6px; min-height: 70px; }
   :host([data-size="medium"]) .card-img { width: 28px; height: 28px; margin-bottom: 5px; }
   :host([data-size="medium"]) .card-icon { font-size: 22px; margin-bottom: 5px; }
   :host([data-size="medium"]) .card-name { font-size: 10px; }
 
-  :host([data-size="large"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+  :host([data-size="large"]) .cards-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
   :host([data-size="large"]) .card { padding: 12px 10px; min-height: 95px; }
   :host([data-size="large"]) .card-img { width: 40px; height: 40px; margin-bottom: 8px; }
   :host([data-size="large"]) .card-icon { font-size: 32px; margin-bottom: 8px; }
@@ -610,6 +595,30 @@ export const cardStyles = css`
     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
   }
 
+
+  .card-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .card-row .card-img,
+  .card-row .card-icon {
+    flex-shrink: 0;
+    margin-bottom: 0;
+  }
+
+  .card-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+  }
+
   .card-name {
     font-weight: 600;
     font-size: 10px;
@@ -621,6 +630,8 @@ export const cardStyles = css`
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     word-break: break-word;
+    margin-top: 6px;
+    text-align: center;
   }
 
   .card-spec {
@@ -628,7 +639,7 @@ export const cardStyles = css`
     color: var(--bring-accent);
     margin-top: 3px;
     cursor: pointer;
-    padding: 2px 6px;
+    padding: 2px 0;
     border-radius: 4px;
     transition: background 0.15s ease;
   }
@@ -639,98 +650,20 @@ export const cardStyles = css`
 
   .card-spec.empty {
     color: var(--bring-text-muted);
-    opacity: 0;
-  }
-
-  .card:hover .card-spec.empty {
     opacity: 1;
   }
 
   .card-category {
-    position: absolute;
-    bottom: 6px;
-    left: 50%;
-    transform: translateX(-50%);
+    margin-top: 3px;
     font-size: 8px;
     color: var(--bring-text-muted);
     background: var(--bring-bg-tertiary);
     padding: 2px 6px;
     border-radius: 4px;
     white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.2s ease;
     max-width: 90%;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .card:hover .card-category {
-    opacity: 1;
-  }
-
-  .card-check {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--bring-text-muted);
-    border-radius: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    background: var(--bring-bg-secondary);
-  }
-
-  .card:hover .card-check {
-    border-color: var(--bring-accent);
-    background: var(--bring-accent-dim);
-  }
-
-  .card-check.checked {
-    background: var(--bring-accent);
-    border-color: var(--bring-accent);
-  }
-
-  .card-check svg {
-    width: 12px;
-    height: 12px;
-    color: var(--bring-bg-primary);
-    opacity: 0;
-    transform: scale(0);
-    transition: all 0.2s ease;
-  }
-
-  .card-check.checked svg {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  /* Drag Handle */
-  .card-drag {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 16px;
-    height: 16px;
-    color: var(--bring-text-muted);
-    opacity: 0;
-    cursor: grab;
-    transition: opacity 0.2s ease;
-  }
-
-  .card:hover .card-drag {
-    opacity: 0.6;
-  }
-
-  .card-drag:hover {
-    opacity: 1 !important;
-    color: var(--bring-accent);
-  }
-
-  .card-drag:active {
-    cursor: grabbing;
   }
 
   /* Quick Add Cards */

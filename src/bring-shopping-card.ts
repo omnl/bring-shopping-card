@@ -3,9 +3,10 @@
  * A beautiful, modern shopping list card
  */
 
-import { LitElement, html, css, nothing, TemplateResult } from 'lit';
+import { LitElement, html, css, nothing, TemplateResult, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { cardStyles } from './styles';
+import { localize } from './localize';
 import type {
   BringCardConfig,
   BringItem,
@@ -79,6 +80,10 @@ export class BringShoppingCardEditor extends LitElement {
     this.dispatchEvent(event);
   }
 
+  private _t(key: Parameters<typeof localize>[1]): string {
+    return localize(this.hass?.locale?.language ?? this.hass?.language, key);
+  }
+
   protected render(): TemplateResult {
     if (!this._config) {
       return html``;
@@ -88,8 +93,8 @@ export class BringShoppingCardEditor extends LitElement {
       <div class="editor">
         <div class="row">
           <div>
-            <div class="label">Show Quick Add</div>
-            <div class="description">Display recently purchased items for quick re-adding</div>
+            <div class="label">${this._t('show_quick_add')}</div>
+            <div class="description">${this._t('show_quick_add_description')}</div>
           </div>
           <ha-switch
             .checked=${this._config.show_recently ?? false}
@@ -99,8 +104,8 @@ export class BringShoppingCardEditor extends LitElement {
 
         <div class="row">
           <div>
-            <div class="label">Show All Items</div>
-            <div class="description">Display all available items grouped by category</div>
+            <div class="label">${this._t('show_all_items')}</div>
+            <div class="description">${this._t('show_all_items_description')}</div>
           </div>
           <ha-switch
             .checked=${this._config.show_available ?? false}
@@ -110,8 +115,8 @@ export class BringShoppingCardEditor extends LitElement {
 
         <div class="row">
           <div>
-            <div class="label">Max Quick Add Items</div>
-            <div class="description">Maximum items to show in Quick Add section</div>
+            <div class="label">${this._t('max_quick_add_items')}</div>
+            <div class="description">${this._t('max_quick_add_items_description')}</div>
           </div>
           <input
             type="number"
@@ -124,16 +129,16 @@ export class BringShoppingCardEditor extends LitElement {
 
         <div class="row">
           <div>
-            <div class="label">Card Size</div>
-            <div class="description">Size of the product item cards</div>
+            <div class="label">${this._t('card_size')}</div>
+            <div class="description">${this._t('card_size_description')}</div>
           </div>
           <select
             @change=${(e: Event) => this._valueChanged('card_size', (e.target as HTMLSelectElement).value)}
             style="padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--card-background-color); color: var(--primary-text-color);"
           >
-            <option value="small" ?selected=${(this._config.card_size ?? 'medium') === 'small'}>Small</option>
-            <option value="medium" ?selected=${(this._config.card_size ?? 'medium') === 'medium'}>Medium</option>
-            <option value="large" ?selected=${(this._config.card_size ?? 'medium') === 'large'}>Large</option>
+            <option value="small" ?selected=${(this._config.card_size ?? 'medium') === 'small'}>${this._t('small')}</option>
+            <option value="medium" ?selected=${(this._config.card_size ?? 'medium') === 'medium'}>${this._t('medium')}</option>
+            <option value="large" ?selected=${(this._config.card_size ?? 'medium') === 'large'}>${this._t('large')}</option>
           </select>
         </div>
       </div>
@@ -163,6 +168,7 @@ export class BringShoppingCard extends LitElement {
   @state() private _showSortMenu = false;
   @state() private _showListDropdown = false;
   @state() private _showSuggestions = false;
+  @state() private _confirmClear = false;
 
   private _failedImages = new Set<string>();
   private _refreshInterval?: number;
@@ -171,6 +177,13 @@ export class BringShoppingCard extends LitElement {
   // multiple cards on one dashboard can be disambiguated via `card_id`.
   private _cardKey = 'default';
   private _draggedItem: BringItem | null = null;
+
+  private _t(
+    key: Parameters<typeof localize>[1],
+    replacements: Record<string, string | number> = {}
+  ): string {
+    return localize(this.hass?.locale?.language ?? this.hass?.language, key, replacements);
+  }
 
   public setConfig(config: BringCardConfig): void {
     if (!config) {
@@ -188,6 +201,12 @@ export class BringShoppingCard extends LitElement {
     this._sortBy = this.config.sort_default || 'manual';
     // Set data attribute for CSS size variants
     this.dataset.size = this.config.card_size || 'medium';
+  }
+
+  protected updated(changedProperties: PropertyValues<this>): void {
+    if (changedProperties.has('hass')) {
+      this.dataset.theme = this.hass?.themes?.darkMode ? 'dark' : 'light';
+    }
   }
 
   public static getConfigElement(): HTMLElement {
@@ -226,6 +245,7 @@ export class BringShoppingCard extends LitElement {
 
       const savedOrder = localStorage.getItem(getStorageKey('order', this._cardKey));
       if (savedOrder) this._customOrder = JSON.parse(savedOrder);
+
     } catch (e) {
       console.error('Failed to load saved state:', e);
     }
@@ -257,12 +277,12 @@ export class BringShoppingCard extends LitElement {
         await this._fetchItems();
       } else {
         this._loading = false;
-        this._error = 'No shopping lists found';
+        this._error = this._t('no_shopping_lists');
       }
     } catch (err) {
       console.error('Failed to fetch lists:', err);
       this._loading = false;
-      this._error = 'Failed to connect to Bring! integration';
+      this._error = this._t('failed_to_connect');
     }
   }
 
@@ -283,7 +303,7 @@ export class BringShoppingCard extends LitElement {
     } catch (err) {
       console.error('Failed to fetch items:', err);
       this._loading = false;
-      this._error = 'Failed to load shopping list';
+      this._error = this._t('failed_to_load_list');
     }
   }
 
@@ -367,34 +387,48 @@ export class BringShoppingCard extends LitElement {
         specification,
       });
 
-      this._showToast(`Added ${name}`, 'success');
+      this._showToast(this._t('added', { name }), 'success');
       await this._fetchItems();
     } catch (err) {
       console.error('Failed to add item:', err);
-      this._showToast('Failed to add item', 'error');
+      this._showToast(this._t('failed_to_add'), 'error');
     }
   }
 
   private async _completeItem(item: BringItem, element: HTMLElement): Promise<void> {
     if (!this._selectedListUuid) return;
-
     element.classList.add('completing');
-
     try {
       await this.hass.callWS({
         type: 'bring_shopping/complete_item',
         list_uuid: this._selectedListUuid,
         original_name: item.originalName,
       });
-
       setTimeout(() => {
-        this._showToast(`Done: ${item.name}`, 'success');
+        this._showToast(this._t('done', { name: item.name }), 'success');
         this._fetchItems();
       }, 350);
     } catch (err) {
       console.error('Failed to complete item:', err);
       element.classList.remove('completing');
-      this._showToast('Failed to complete item', 'error');
+      this._showToast(this._t('failed_to_complete'), 'error');
+    }
+  }
+
+  private async _clearList(): Promise<void> {
+    if (!this._selectedListUuid || !this._items.length) return;
+    if (!this._confirmClear) {
+      this._confirmClear = true;
+      window.setTimeout(() => (this._confirmClear = false), 4000);
+      return;
+    }
+    this._confirmClear = false;
+    try {
+      await Promise.all(this._items.map(item => this.hass.callWS({ type: 'bring_shopping/remove_item', list_uuid: this._selectedListUuid!, original_name: item.originalName })));
+      await this._fetchItems();
+    } catch (err) {
+      console.error('Failed to clear list:', err);
+      this._showToast(this._t('failed_to_remove'), 'error');
     }
   }
 
@@ -409,11 +443,11 @@ export class BringShoppingCard extends LitElement {
         specification: newSpec,
       });
 
-      this._showToast('Updated', 'success');
+      this._showToast(this._t('updated'), 'success');
       await this._fetchItems();
     } catch (err) {
       console.error('Failed to update item:', err);
-      this._showToast('Failed to update', 'error');
+      this._showToast(this._t('failed_to_update'), 'error');
     }
   }
 
@@ -561,14 +595,6 @@ export class BringShoppingCard extends LitElement {
 
     return html`
       <header class="header">
-        <div class="logo">
-          <div class="logo-icon">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
-            </svg>
-          </div>
-          <div class="logo-text">Bring<span class="accent">!</span> <span class="subtitle">Shopping Card</span></div>
-        </div>
         <div class="header-actions">
           ${this._lists.length > 1
             ? html`
@@ -581,9 +607,9 @@ export class BringShoppingCard extends LitElement {
                       this._showListDropdown = !this._showListDropdown;
                       this._showSortMenu = false;
                     }}
-                    title="Select List"
+                    title=${this._t('select_list')}
                   >
-                    <span class="list-btn-text">${selectedList?.name || 'List'}</span>
+                    <span class="list-btn-text">${selectedList?.name || this._t('list')}</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
@@ -620,7 +646,7 @@ export class BringShoppingCard extends LitElement {
                 this._showSortMenu = !this._showSortMenu;
                 this._showListDropdown = false;
               }}
-              title="Sort"
+              title=${this._t('sort')}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="4" y1="6" x2="20" y2="6"></line>
@@ -644,10 +670,10 @@ export class BringShoppingCard extends LitElement {
                           }}
                         >
                           ${{
-                            manual: 'Manual Order',
+                            manual: this._t('manual_order'),
                             alpha: 'A-Z',
-                            category: 'By Category',
-                            recent: 'Recently Added',
+                            category: this._t('by_category'),
+                            recent: this._t('recently_added'),
                           }[mode]}
                         </div>
                       `
@@ -665,7 +691,7 @@ export class BringShoppingCard extends LitElement {
               await this._fetchItems();
               btn.classList.remove('spinning');
             }}
-            title="Refresh"
+            title=${this._t('refresh')}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
@@ -686,7 +712,7 @@ export class BringShoppingCard extends LitElement {
           <input
             type="text"
             class="add-input"
-            placeholder="Add item..."
+            placeholder=${this._t('add_item_placeholder')}
             autocomplete="off"
             @input=${this._handleInputChange}
             @keydown=${this._handleInputKeydown}
@@ -723,6 +749,7 @@ export class BringShoppingCard extends LitElement {
         </div>
         <button
           class="add-btn"
+          ?disabled=${!this._searchQuery.trim()}
           @click=${() => {
             const input = this.shadowRoot?.querySelector('.add-input') as HTMLInputElement;
             if (input?.value.trim()) {
@@ -732,7 +759,7 @@ export class BringShoppingCard extends LitElement {
             }
           }}
         >
-          Add
+          ${this._t('add')}
         </button>
       </div>
     `;
@@ -744,15 +771,20 @@ export class BringShoppingCard extends LitElement {
     return html`
       <section class="section">
         <div class="section-header">
-          <span class="section-title">To Buy</span>
-          <span class="section-count">${this._items.length}</span>
+          <span class="section-title">${this._t('to_buy')}</span>
+          <div class="section-actions">
+            <span class="section-count">${this._items.length}</span>
+            <button class="clear-list-btn ${this._confirmClear ? 'confirm' : ''}" @click=${this._clearList} ?disabled=${!this._items.length}>
+              ${this._confirmClear ? this._t('confirm_clear_list') : this._t('clear_list')}
+            </button>
+          </div>
         </div>
         ${this._items.length === 0
           ? html`
               <div class="empty-state">
                 <div class="empty-icon">✨</div>
-                <div class="empty-text">List is empty!</div>
-                <div class="empty-sub">Add items above or tap below</div>
+                <div class="empty-text">${this._t('list_empty')}</div>
+                <div class="empty-sub">${this._t('empty_list_hint')}</div>
               </div>
             `
           : html`
@@ -762,6 +794,7 @@ export class BringShoppingCard extends LitElement {
                     <div
                       class="card"
                       draggable="true"
+                      @click=${(e: Event) => this._completeItem(item, e.currentTarget as HTMLElement)}
                       @dragstart=${(e: DragEvent) => this._handleDragStart(e, item)}
                       @dragend=${this._handleDragEnd}
                       @dragover=${this._handleDragOver}
@@ -769,41 +802,20 @@ export class BringShoppingCard extends LitElement {
                       @dragleave=${(e: DragEvent) => this._handleDragLeave(e, e.currentTarget as HTMLElement)}
                       @drop=${(e: DragEvent) => this._handleDrop(e, item, e.currentTarget as HTMLElement)}
                     >
-                      <div class="card-drag">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                          <circle cx="9" cy="5" r="1.5"></circle>
-                          <circle cx="9" cy="12" r="1.5"></circle>
-                          <circle cx="9" cy="19" r="1.5"></circle>
-                          <circle cx="15" cy="5" r="1.5"></circle>
-                          <circle cx="15" cy="12" r="1.5"></circle>
-                          <circle cx="15" cy="19" r="1.5"></circle>
-                        </svg>
+                      <div class="card-content">
+                        <div class="card-row">${this._renderImage(item, 'large')}</div>
+                        <span class="card-name">${item.name}</span>
+                        <span
+                          class="card-spec ${item.specification ? '' : 'empty'}"
+                          @click=${(e: Event) => {
+                            e.stopPropagation();
+                            this._editingItem = item;
+                          }}
+                        >
+                          ${item.specification || this._t('add_note')}
+                        </span>
+                        ${item.category ? html`<span class="card-category">${item.category}</span>` : nothing}
                       </div>
-                      <div
-                        class="card-check"
-                        @click=${(e: Event) => {
-                          e.stopPropagation();
-                          const check = e.currentTarget as HTMLElement;
-                          check.classList.add('checked');
-                          this._completeItem(item, check.closest('.card') as HTMLElement);
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                          <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                      </div>
-                      ${this._renderImage(item, 'large')}
-                      <span class="card-name">${item.name}</span>
-                      <span
-                        class="card-spec ${item.specification ? '' : 'empty'}"
-                        @click=${(e: Event) => {
-                          e.stopPropagation();
-                          this._editingItem = item;
-                        }}
-                      >
-                        ${item.specification || '+ note'}
-                      </span>
-                      ${item.category ? html`<span class="card-category">${item.category}</span>` : nothing}
                     </div>
                   `
                 )}
@@ -821,7 +833,7 @@ export class BringShoppingCard extends LitElement {
     return html`
       <section class="section">
         <div class="section-header">
-          <span class="section-title">Quick Add</span>
+          <span class="section-title">${this._t('quick_add')}</span>
         </div>
         <div class="quick-grid">
           ${quickItems.map(
@@ -851,7 +863,7 @@ export class BringShoppingCard extends LitElement {
     // Group by category
     const categories: Record<string, BringItem[]> = {};
     this._availableItems.forEach(item => {
-      const cat = item.category || 'Other';
+      const cat = item.category || this._t('other');
       if (!categories[cat]) categories[cat] = [];
       categories[cat].push(item);
     });
@@ -861,7 +873,7 @@ export class BringShoppingCard extends LitElement {
       <div class="divider"></div>
       <section class="section">
         <div class="section-header">
-          <span class="section-title">All Items</span>
+          <span class="section-title">${this._t('all_items')}</span>
           <span class="section-count">${this._availableItems.length}</span>
         </div>
         ${sortedCategories.map(
@@ -919,11 +931,11 @@ export class BringShoppingCard extends LitElement {
         }}
       >
         <div class="modal">
-          <div class="modal-title">Edit: ${this._editingItem.name}</div>
+          <div class="modal-title">${this._t('edit', { name: this._editingItem.name })}</div>
           <input
             type="text"
             class="modal-input"
-            placeholder="e.g., 2 lbs, organic"
+            placeholder=${this._t('specification_placeholder')}
             .value=${this._editingItem.specification || ''}
             @keypress=${(e: KeyboardEvent) => {
               if (e.key === 'Enter') {
@@ -934,7 +946,7 @@ export class BringShoppingCard extends LitElement {
             }}
           />
           <div class="modal-actions">
-            <button class="modal-btn cancel" @click=${() => (this._editingItem = null)}>Cancel</button>
+            <button class="modal-btn cancel" @click=${() => (this._editingItem = null)}>${this._t('cancel')}</button>
             <button
               class="modal-btn save"
               @click=${() => {
@@ -943,7 +955,7 @@ export class BringShoppingCard extends LitElement {
                 this._editingItem = null;
               }}
             >
-              Save
+              ${this._t('save')}
             </button>
           </div>
         </div>

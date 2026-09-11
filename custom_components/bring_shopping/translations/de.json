@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bring! Einkaufskarte",
+        "description": "Gib die Zugangsdaten deines Bring!-Kontos ein, um deine Einkaufslisten zu verbinden.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Bring! erneut authentifizieren",
+        "description": "Gib deine Bring!-Zugangsdaten erneut ein.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültige E-Mail-Adresse oder ungültiges Passwort",
+      "cannot_connect": "Verbindung mit den Bring!-Servern nicht möglich",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten"
+    },
+    "abort": {
+      "already_configured": "Dieses Bring!-Konto ist bereits eingerichtet",
+      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+    }
+  }
+}
