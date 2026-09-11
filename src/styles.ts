@@ -563,6 +563,26 @@ export const cardStyles = css`
     transform: translateY(0) scale(0.98);
   }
 
+  .card.pending,
+  .quick-card.pending {
+    cursor: wait;
+    opacity: 0.5;
+    filter: saturate(0.65);
+    pointer-events: none;
+  }
+
+  .card-pending {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+  }
+
   .card.completing {
     animation: cardComplete 0.4s ease-out forwards;
   }

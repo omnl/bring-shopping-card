@@ -16,8 +16,10 @@ UPDATE_INTERVAL: Final = 60
 # WebSocket API commands
 WS_TYPE_GET_LISTS: Final = "bring_shopping/get_lists"
 WS_TYPE_GET_ITEMS: Final = "bring_shopping/get_items"
+WS_TYPE_REFRESH_ITEMS: Final = "bring_shopping/refresh_items"
 WS_TYPE_ADD_ITEM: Final = "bring_shopping/add_item"
 WS_TYPE_COMPLETE_ITEM: Final = "bring_shopping/complete_item"
+WS_TYPE_COMPLETE_ITEMS: Final = "bring_shopping/complete_items"
 WS_TYPE_UPDATE_ITEM: Final = "bring_shopping/update_item"
 WS_TYPE_REORDER_ITEMS: Final = "bring_shopping/reorder_items"
 

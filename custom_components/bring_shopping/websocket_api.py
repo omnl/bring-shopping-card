@@ -18,8 +18,10 @@ from .const import (
     DOMAIN,
     WS_TYPE_ADD_ITEM,
     WS_TYPE_COMPLETE_ITEM,
+    WS_TYPE_COMPLETE_ITEMS,
     WS_TYPE_GET_ITEMS,
     WS_TYPE_GET_LISTS,
+    WS_TYPE_REFRESH_ITEMS,
     WS_TYPE_REORDER_ITEMS,
     WS_TYPE_UPDATE_ITEM,
 )
@@ -40,8 +42,10 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, ws_get_lists)
     websocket_api.async_register_command(hass, ws_get_items)
+    websocket_api.async_register_command(hass, ws_refresh_items)
     websocket_api.async_register_command(hass, ws_add_item)
     websocket_api.async_register_command(hass, ws_complete_item)
+    websocket_api.async_register_command(hass, ws_complete_items)
     websocket_api.async_register_command(hass, ws_update_item)
     websocket_api.async_register_command(hass, ws_reorder_items)
 
@@ -64,7 +68,10 @@ def _coordinator_for_list(
     account actually contains the list, rather than always the first one.
     """
     for coordinator in _iter_coordinators(hass):
-        if coordinator.data and list_uuid in coordinator.data.lists:
+        if (
+            coordinator.data
+            and list_uuid in coordinator.data.lists
+        ) or coordinator.owns_list(list_uuid):
             return coordinator
     return None
 
@@ -149,6 +156,27 @@ def ws_get_items(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): WS_TYPE_REFRESH_ITEMS,
+        vol.Required(ATTR_LIST_UUID): str,
+    }
+)
+@websocket_api.async_response
+async def ws_refresh_items(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Refresh one list from Bring before returning its current data."""
+    list_uuid = msg[ATTR_LIST_UUID]
+    coordinator = _coordinator_for_list(hass, list_uuid)
+    if not coordinator or not await coordinator.async_refresh_list(list_uuid):
+        connection.send_error(msg["id"], "failed", f"Failed to refresh {list_uuid}")
+        return
+    ws_get_items(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): WS_TYPE_ADD_ITEM,
         vol.Required(ATTR_LIST_UUID): str,
         vol.Required(ATTR_ITEM_NAME): str,
@@ -211,6 +239,34 @@ async def ws_complete_item(
         connection.send_result(msg["id"], {"success": True})
     else:
         connection.send_error(msg["id"], "failed", "Failed to complete item")
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_TYPE_COMPLETE_ITEMS,
+        vol.Required(ATTR_LIST_UUID): str,
+        vol.Required("items"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_complete_items(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Mark multiple items as completed in one Bring request."""
+    list_uuid = msg[ATTR_LIST_UUID]
+    coordinator = _coordinator_for_list(hass, list_uuid)
+
+    if not coordinator:
+        connection.send_error(msg["id"], "not_found", f"List {list_uuid} not found")
+        return
+
+    success = await coordinator.async_complete_items(list_uuid, msg["items"])
+    if success:
+        connection.send_result(msg["id"], {"success": True})
+    else:
+        connection.send_error(msg["id"], "failed", "Failed to complete items")
 
 
 @websocket_api.websocket_command(

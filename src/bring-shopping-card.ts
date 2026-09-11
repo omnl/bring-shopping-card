@@ -175,7 +175,6 @@ export class BringShoppingCard extends LitElement {
   private _pendingCompletionItems = new Map<string, BringItem>();
   private _pendingAdditions = new Map<string, BringItem>();
   private _pendingSpecifications = new Map<string, string>();
-  private _completionTimers = new Map<string, number>();
   private _refreshInterval?: number;
   private _fetchSequence = 0;
   private _suppressCardClickUntil = 0;
@@ -183,6 +182,7 @@ export class BringShoppingCard extends LitElement {
   // Must NOT be random, or nothing survives a page reload. Set from config so
   // multiple cards on one dashboard can be disambiguated via `card_id`.
   private _cardKey = 'default';
+  private _stateLoaded = false;
   private _draggedItem: BringItem | null = null;
 
   private _t(
@@ -196,6 +196,8 @@ export class BringShoppingCard extends LitElement {
     if (!config) {
       throw new Error('Invalid configuration');
     }
+    const nextCardKey = config.card_id || 'default';
+    const cardKeyChanged = nextCardKey !== this._cardKey;
     this.config = {
       show_recently: false,
       show_available: false,
@@ -204,8 +206,14 @@ export class BringShoppingCard extends LitElement {
       card_size: 'medium',
       ...config,
     };
-    this._cardKey = this.config.card_id || 'default';
-    this._sortBy = this.config.sort_default || 'manual';
+    this._cardKey = nextCardKey;
+    if (!this._stateLoaded) {
+      this._sortBy = this.config.sort_default || 'manual';
+    } else if (cardKeyChanged) {
+      this._sortBy = this.config.sort_default || 'manual';
+      this._customOrder = [];
+      this._loadSavedState();
+    }
     // Set data attribute for CSS size variants
     this.dataset.size = this.config.card_size || 'medium';
   }
@@ -233,6 +241,7 @@ export class BringShoppingCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     this._loadSavedState();
+    this._stateLoaded = true;
     this._fetchLists();
     this._startAutoRefresh();
   }
@@ -250,7 +259,9 @@ export class BringShoppingCard extends LitElement {
       const savedSort = localStorage.getItem(getStorageKey('sort', this._cardKey));
       if (savedSort) this._sortBy = savedSort as SortMode;
 
-      const savedOrder = localStorage.getItem(getStorageKey('order', this._cardKey));
+      const orderKey = this._selectedListUuid ? `order-${this._selectedListUuid}` : 'order';
+      const savedOrder = localStorage.getItem(getStorageKey(orderKey, this._cardKey))
+        || localStorage.getItem(getStorageKey('order', this._cardKey));
       if (savedOrder) this._customOrder = JSON.parse(savedOrder);
 
     } catch (e) {
@@ -264,7 +275,12 @@ export class BringShoppingCard extends LitElement {
         localStorage.setItem(getStorageKey('list', this._cardKey), this._selectedListUuid);
       }
       localStorage.setItem(getStorageKey('sort', this._cardKey), this._sortBy);
-      localStorage.setItem(getStorageKey('order', this._cardKey), JSON.stringify(this._customOrder));
+      if (this._selectedListUuid) {
+        localStorage.setItem(
+          getStorageKey(`order-${this._selectedListUuid}`, this._cardKey),
+          JSON.stringify(this._customOrder)
+        );
+      }
     } catch (e) {
       console.error('Failed to save state:', e);
     }
@@ -282,6 +298,7 @@ export class BringShoppingCard extends LitElement {
           this._selectedListUuid = this._lists[0].uuid;
         }
         await this._fetchItems();
+        void this._fetchItems(true);
       } else {
         this._loading = false;
         this._error = this._t('no_shopping_lists');
@@ -293,43 +310,43 @@ export class BringShoppingCard extends LitElement {
     }
   }
 
-  private async _fetchItems(): Promise<void> {
+  private _isItemPending(item: BringItem, listUuid = this._selectedListUuid): boolean {
+    if (!listUuid) return false;
+    const key = `${listUuid}:${item.originalName}`;
+    return this._pendingCompletions.has(key)
+      || this._pendingAdditions.has(key)
+      || this._pendingSpecifications.has(key);
+  }
+
+  private _invalidateFetchesFor(listUuid: string): void {
+    if (this._selectedListUuid === listUuid) this._fetchSequence += 1;
+  }
+
+  private async _fetchItems(forceCloud = false): Promise<void> {
     if (!this._selectedListUuid) return;
     const listUuid = this._selectedListUuid;
     const sequence = ++this._fetchSequence;
 
     try {
       const response = await this.hass.callWS<WsItemsResponse>({
-        type: 'bring_shopping/get_items',
+        type: forceCloud ? 'bring_shopping/refresh_items' : 'bring_shopping/get_items',
         list_uuid: listUuid,
       });
 
       if (sequence !== this._fetchSequence || listUuid !== this._selectedListUuid) return;
 
-      const serverItemNames = new Set(response.purchase.map(item => item.originalName));
-      for (const key of [...this._pendingCompletions]) {
-        const itemName = key.slice(listUuid.length + 1);
-        const isConfirmed = !serverItemNames.has(itemName)
-          && response.recently.some(item => item.originalName === itemName)
-          && response.available.some(item => item.originalName === itemName);
-        if (key.startsWith(`${listUuid}:`) && isConfirmed) {
-          this._pendingCompletions.delete(key);
-          this._pendingCompletionItems.delete(key);
-          const timer = this._completionTimers.get(key);
-          if (timer) clearTimeout(timer);
-          this._completionTimers.delete(key);
-        }
-      }
-      let items = response.purchase.filter(
-        item => !this._pendingCompletions.has(`${listUuid}:${item.originalName}`)
-      );
+      let items = response.purchase;
       const visibleItemNames = new Set(items.map(item => item.originalName));
 
       for (const [key, item] of [...this._pendingAdditions]) {
         if (!key.startsWith(`${listUuid}:`)) continue;
-        if (visibleItemNames.has(item.originalName)) {
+        // A later completion wins over an in-flight addition of the same item.
+        // Never let an old add response resurrect a just-completed item.
+        if (this._pendingCompletions.has(key)) {
           this._pendingAdditions.delete(key);
-        } else {
+          continue;
+        }
+        if (!visibleItemNames.has(item.originalName)) {
           items = [...items, item];
         }
       }
@@ -338,7 +355,6 @@ export class BringShoppingCard extends LitElement {
         const key = `${listUuid}:${item.originalName}`;
         const specification = this._pendingSpecifications.get(key);
         if (specification === undefined) return item;
-        if (item.specification === specification) this._pendingSpecifications.delete(key);
         return { ...item, specification };
       });
 
@@ -362,6 +378,10 @@ export class BringShoppingCard extends LitElement {
     } catch (err) {
       console.error('Failed to fetch items:', err);
       this._loading = false;
+      if (forceCloud) {
+        this._showToast(this._t('failed_to_load_list'), 'error');
+        return;
+      }
       if (this._items.length === 0) {
         this._error = this._t('failed_to_load_list');
       } else {
@@ -371,6 +391,7 @@ export class BringShoppingCard extends LitElement {
   }
 
   private _startAutoRefresh(): void {
+    if (this._refreshInterval) return;
     this._refreshInterval = window.setInterval(() => {
       if (!document.hidden) {
         this._fetchItems();
@@ -381,6 +402,7 @@ export class BringShoppingCard extends LitElement {
   private _stopAutoRefresh(): void {
     if (this._refreshInterval) {
       clearInterval(this._refreshInterval);
+      this._refreshInterval = undefined;
     }
   }
 
@@ -444,7 +466,12 @@ export class BringShoppingCard extends LitElement {
     const itemName = name.trim();
     const canonicalName = originalName || itemName;
     const pendingKey = `${listUuid}:${canonicalName}`;
-    if (this._pendingAdditions.has(pendingKey)) return;
+    if (
+      this._pendingAdditions.has(pendingKey)
+      || this._pendingCompletions.has(pendingKey)
+      || this._pendingSpecifications.has(pendingKey)
+    ) return;
+    this._invalidateFetchesFor(listUuid);
 
     const sourceAvailableItem = this._availableItems.find(item => item.originalName === canonicalName);
     const sourceRecentItem = this._recentItems.find(item => item.originalName === canonicalName);
@@ -473,10 +500,15 @@ export class BringShoppingCard extends LitElement {
         specification,
       });
 
+      this._invalidateFetchesFor(listUuid);
+      this._pendingAdditions.delete(pendingKey);
+      this._items = this._items.map(item =>
+        item.originalName === canonicalName ? { ...item, specification } : item
+      );
       this._showToast(this._t('added', { name }), 'success');
-      await this._fetchItems();
     } catch (err) {
       console.error('Failed to add item:', err);
+      this._invalidateFetchesFor(listUuid);
       this._pendingAdditions.delete(pendingKey);
       if (this._selectedListUuid === listUuid) {
         this._items = this._items.filter(item => item.originalName !== canonicalName);
@@ -496,44 +528,45 @@ export class BringShoppingCard extends LitElement {
     const listUuid = this._selectedListUuid;
     const pendingKey = `${listUuid}:${item.originalName}`;
     if (this._pendingCompletions.has(pendingKey)) return;
+    this._invalidateFetchesFor(listUuid);
 
-    const originalIndex = this._items.findIndex(current => current.originalName === item.originalName);
+    const wasRecent = this._recentItems.some(current => current.originalName === item.originalName);
+    const wasAvailable = this._availableItems.some(current => current.originalName === item.originalName);
     this._pendingCompletions.add(pendingKey);
     this._pendingCompletionItems.set(pendingKey, item);
-    this._items = this._items.filter(current => current.originalName !== item.originalName);
+    this._items = [...this._items];
     if (!this._recentItems.some(current => current.originalName === item.originalName)) {
       this._recentItems = [item, ...this._recentItems];
     }
     if (!this._availableItems.some(current => current.originalName === item.originalName)) {
       this._availableItems = [item, ...this._availableItems];
     }
-    this._showToast(this._t('done', { name: item.name }), 'success');
-
     try {
       await this.hass.callWS({
         type: 'bring_shopping/complete_item',
         list_uuid: listUuid,
         original_name: item.originalName,
       });
-      // Keep stale coordinator reads from briefly restoring the item, then
-      // ask for the authoritative state once Bring has had time to settle.
-      const timer = window.setTimeout(() => {
-        this._pendingCompletions.delete(pendingKey);
-        this._pendingCompletionItems.delete(pendingKey);
-        this._completionTimers.delete(pendingKey);
-        this._fetchItems();
-      }, 15000);
-      this._completionTimers.set(pendingKey, timer);
-    } catch (err) {
-      console.error('Failed to complete item:', err);
+      this._invalidateFetchesFor(listUuid);
       this._pendingCompletions.delete(pendingKey);
       this._pendingCompletionItems.delete(pendingKey);
-      if (this._selectedListUuid === listUuid && !this._items.some(current => current.originalName === item.originalName)) {
-        this._items = [
-          ...this._items.slice(0, Math.max(0, originalIndex)),
-          item,
-          ...this._items.slice(Math.max(0, originalIndex)),
-        ];
+      if (this._selectedListUuid === listUuid) {
+        this._items = this._items.filter(current => current.originalName !== item.originalName);
+      }
+      this._showToast(this._t('done', { name: item.name }), 'success');
+    } catch (err) {
+      console.error('Failed to complete item:', err);
+      this._invalidateFetchesFor(listUuid);
+      this._pendingCompletions.delete(pendingKey);
+      this._pendingCompletionItems.delete(pendingKey);
+      if (this._selectedListUuid === listUuid) {
+        this._items = [...this._items];
+        if (!wasRecent) {
+          this._recentItems = this._recentItems.filter(current => current.originalName !== item.originalName);
+        }
+        if (!wasAvailable) {
+          this._availableItems = this._availableItems.filter(current => current.originalName !== item.originalName);
+        }
       }
       this._showToast(this._t('failed_to_complete'), 'error');
     }
@@ -554,7 +587,7 @@ export class BringShoppingCard extends LitElement {
       this._pendingCompletions.add(key);
       this._pendingCompletionItems.set(key, item);
     });
-    this._items = [];
+    this._items = [...itemsToComplete];
     this._recentItems = [
       ...itemsToComplete.filter(item => !this._recentItems.some(current => current.originalName === item.originalName)),
       ...this._recentItems,
@@ -564,37 +597,44 @@ export class BringShoppingCard extends LitElement {
       ...this._availableItems,
     ];
 
-    const results = await Promise.allSettled(itemsToComplete.map(item => this.hass.callWS({
-      type: 'bring_shopping/complete_item',
-      list_uuid: listUuid,
-      original_name: item.originalName,
-    })));
-    const failedItems = itemsToComplete.filter((_, index) => results[index].status === 'rejected');
-    failedItems.forEach(item => {
-      const key = `${listUuid}:${item.originalName}`;
-      this._pendingCompletions.delete(key);
-      this._pendingCompletionItems.delete(key);
-    });
-
-    if (this._selectedListUuid === listUuid && failedItems.length) {
-      this._items = [...this._items, ...failedItems];
-      this._recentItems = this._recentItems.filter(
-        item => !failedItems.some(failed => failed.originalName === item.originalName)
-      );
-      this._availableItems = this._availableItems.filter(
-        item => !failedItems.some(failed => failed.originalName === item.originalName)
-      );
+    this._invalidateFetchesFor(listUuid);
+    try {
+      await this.hass.callWS({
+        type: 'bring_shopping/complete_items',
+        list_uuid: listUuid,
+        items: itemsToComplete.map(item => item.originalName),
+      });
+      this._invalidateFetchesFor(listUuid);
+      itemsToComplete.forEach(item => {
+        const key = `${listUuid}:${item.originalName}`;
+        this._pendingCompletions.delete(key);
+        this._pendingCompletionItems.delete(key);
+      });
+      if (this._selectedListUuid === listUuid) {
+        const completedNames = new Set(itemsToComplete.map(item => item.originalName));
+        this._items = this._items.filter(item => !completedNames.has(item.originalName));
+      }
+    } catch (err) {
+      console.error('Failed to clear list:', err);
+      this._invalidateFetchesFor(listUuid);
+      itemsToComplete.forEach(item => {
+        const key = `${listUuid}:${item.originalName}`;
+        this._pendingCompletions.delete(key);
+        this._pendingCompletionItems.delete(key);
+      });
+      if (this._selectedListUuid === listUuid) {
+        await this._fetchItems(true);
+      }
       this._showToast(this._t('failed_to_remove'), 'error');
     }
-    // The coordinator refresh runs in the background. Reading it immediately
-    // can return the pre-completion snapshot and visually undo the clear.
-    window.setTimeout(() => this._fetchItems(), 15000);
   }
 
   private async _updateItemSpec(item: BringItem, newSpec: string): Promise<void> {
     if (!this._selectedListUuid) return;
     const listUuid = this._selectedListUuid;
     const pendingKey = `${listUuid}:${item.originalName}`;
+    if (this._isItemPending(item, listUuid)) return;
+    this._invalidateFetchesFor(listUuid);
     const previousSpec = item.specification;
     this._pendingSpecifications.set(pendingKey, newSpec);
     this._items = this._items.map(current =>
@@ -609,10 +649,13 @@ export class BringShoppingCard extends LitElement {
         specification: newSpec,
       });
 
+      this._invalidateFetchesFor(listUuid);
+      this._pendingSpecifications.delete(pendingKey);
+      this._items = [...this._items];
       this._showToast(this._t('updated'), 'success');
-      await this._fetchItems();
     } catch (err) {
       console.error('Failed to update item:', err);
+      this._invalidateFetchesFor(listUuid);
       this._pendingSpecifications.delete(pendingKey);
       if (this._selectedListUuid === listUuid) {
         this._items = this._items.map(current =>
@@ -733,11 +776,24 @@ export class BringShoppingCard extends LitElement {
 
   private _selectList(list: BringList): void {
     this._selectedListUuid = list.uuid;
+    try {
+      const savedOrder = localStorage.getItem(
+        getStorageKey(`order-${list.uuid}`, this._cardKey)
+      );
+      this._customOrder = savedOrder ? JSON.parse(savedOrder) : [];
+    } catch {
+      this._customOrder = [];
+    }
     this._showListDropdown = false;
     this._loading = true;
     this._items = [];
+    this._recentItems = [];
+    this._availableItems = [];
+    this._confirmClear = false;
+    this._showSuggestions = false;
+    this._searchQuery = '';
     this._saveState();
-    this._fetchItems();
+    void this._fetchItems().then(() => this._fetchItems(true));
   }
 
   private _renderImage(item: BringItem, size: 'large' | 'small'): TemplateResult {
@@ -861,7 +917,7 @@ export class BringShoppingCard extends LitElement {
               if (this._lists.length === 0) {
                 await this._fetchLists();
               } else {
-                await this._fetchItems();
+                await this._fetchItems(true);
               }
               btn.classList.remove('spinning');
             }}
@@ -946,7 +1002,7 @@ export class BringShoppingCard extends LitElement {
           <span class="section-title">${this._t('to_buy')}</span>
           <div class="section-actions">
             <span class="section-count">${this._items.length}</span>
-            <button class="clear-list-btn ${this._confirmClear ? 'confirm' : ''}" @click=${this._clearList} ?disabled=${!this._items.length}>
+            <button class="clear-list-btn ${this._confirmClear ? 'confirm' : ''}" @click=${this._clearList} ?disabled=${!this._items.length || this._items.some(item => this._isItemPending(item))}>
               ${this._confirmClear ? this._t('confirm_clear_list') : this._t('clear_list')}
             </button>
           </div>
@@ -961,13 +1017,15 @@ export class BringShoppingCard extends LitElement {
             `
           : html`
               <div class="cards-grid">
-                ${sortedItems.map(
-                  item => html`
+                ${sortedItems.map(item => {
+                  const pending = this._isItemPending(item);
+                  return html`
                     <div
-                      class="card"
-                      draggable="true"
+                      class="card ${pending ? 'pending' : ''}"
+                      ?draggable=${!pending}
+                      aria-busy=${pending ? 'true' : 'false'}
                       @click=${() => {
-                        if (Date.now() >= this._suppressCardClickUntil) this._completeItem(item);
+                        if (!pending && Date.now() >= this._suppressCardClickUntil) this._completeItem(item);
                       }}
                       @dragstart=${(e: DragEvent) => this._handleDragStart(e, item)}
                       @dragend=${this._handleDragEnd}
@@ -983,16 +1041,17 @@ export class BringShoppingCard extends LitElement {
                           class="card-spec ${item.specification ? '' : 'empty'}"
                           @click=${(e: Event) => {
                             e.stopPropagation();
-                            this._editingItem = item;
+                            if (!pending) this._editingItem = item;
                           }}
                         >
                           ${item.specification || this._t('add_note')}
                         </span>
                         ${item.category ? html`<span class="card-category">${item.category}</span>` : nothing}
                       </div>
+                      ${pending ? html`<span class="card-pending" aria-label="Wird synchronisiert"></span>` : nothing}
                     </div>
-                  `
-                )}
+                  `;
+                })}
               </div>
             `}
       </section>
@@ -1013,8 +1072,9 @@ export class BringShoppingCard extends LitElement {
           ${quickItems.map(
             item => html`
               <div
-                class="quick-card"
+                class="quick-card ${this._isItemPending(item) ? 'pending' : ''}"
                 @click=${(e: Event) => {
+                  if (this._isItemPending(item)) return;
                   const el = e.currentTarget as HTMLElement;
                   el.classList.add('adding');
                   setTimeout(() => el.classList.remove('adding'), 300);
@@ -1073,8 +1133,9 @@ export class BringShoppingCard extends LitElement {
                 ${categories[cat].map(
                   item => html`
                     <div
-                      class="quick-card"
+                      class="quick-card ${this._isItemPending(item) ? 'pending' : ''}"
                       @click=${(e: Event) => {
+                        if (this._isItemPending(item)) return;
                         const el = e.currentTarget as HTMLElement;
                         el.classList.add('adding');
                         setTimeout(() => el.classList.remove('adding'), 300);
@@ -1114,7 +1175,9 @@ export class BringShoppingCard extends LitElement {
             @keypress=${(e: KeyboardEvent) => {
               if (e.key === 'Enter') {
                 const input = e.target as HTMLInputElement;
-                this._updateItemSpec(this._editingItem!, input.value.trim());
+                const editingItem = this._editingItem;
+                if (!editingItem) return;
+                this._updateItemSpec(editingItem, input.value.trim());
                 this._editingItem = null;
               }
             }}
@@ -1125,7 +1188,9 @@ export class BringShoppingCard extends LitElement {
               class="modal-btn save"
               @click=${() => {
                 const input = this.shadowRoot?.querySelector('.modal-input') as HTMLInputElement;
-                this._updateItemSpec(this._editingItem!, input.value.trim());
+                const editingItem = this._editingItem;
+                if (!editingItem) return;
+                this._updateItemSpec(editingItem, input.value.trim());
                 this._editingItem = null;
               }}
             >

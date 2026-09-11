@@ -47,7 +47,7 @@ const hass = {
 
     const list = data[message.list_uuid];
     if (!list) throw new Error('Unbekannte Demo-Liste');
-    if (message.type === 'bring_shopping/get_items') {
+    if (message.type === 'bring_shopping/get_items' || message.type === 'bring_shopping/refresh_items') {
       return { listUuid: message.list_uuid, name: lists.find(({ uuid }) => uuid === message.list_uuid).name, ...clone(list) };
     }
     if (message.type === 'bring_shopping/add_item') {
@@ -59,6 +59,13 @@ const hass = {
     if (message.type === 'bring_shopping/complete_item') {
       const index = list.purchase.findIndex(({ originalName }) => originalName === message.original_name);
       if (index >= 0) list.recently.unshift(list.purchase.splice(index, 1)[0]);
+      return { success: true };
+    }
+    if (message.type === 'bring_shopping/complete_items') {
+      for (const originalName of message.items) {
+        const index = list.purchase.findIndex(item => item.originalName === originalName);
+        if (index >= 0) list.recently.unshift(list.purchase.splice(index, 1)[0]);
+      }
       return { success: true };
     }
     if (message.type === 'bring_shopping/update_item') {

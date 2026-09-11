@@ -12,6 +12,7 @@ from homeassistant.components.todo import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -53,6 +54,7 @@ class BringTodoListEntity(CoordinatorEntity[BringDataUpdateCoordinator], TodoLis
         TodoListEntityFeature.CREATE_TODO_ITEM
         | TodoListEntityFeature.UPDATE_TODO_ITEM
         | TodoListEntityFeature.DELETE_TODO_ITEM
+        | getattr(TodoListEntityFeature, "SET_DESCRIPTION_ON_ITEM", 0)
     )
 
     def __init__(
@@ -111,11 +113,13 @@ class BringTodoListEntity(CoordinatorEntity[BringDataUpdateCoordinator], TodoLis
         if not item.summary:
             return
 
-        await self.coordinator.async_add_item(
+        success = await self.coordinator.async_add_item(
             self._list_uuid,
             item.summary,
             item.description or "",
         )
+        if not success:
+            raise HomeAssistantError(f"Failed to add {item.summary} to Bring")
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update a todo item."""
@@ -125,25 +129,29 @@ class BringTodoListEntity(CoordinatorEntity[BringDataUpdateCoordinator], TodoLis
         # Handle completion status change
         if item.status == TodoItemStatus.COMPLETED:
             # Item is being marked as completed
-            original_name = item.uid.replace("recent_", "")
-            await self.coordinator.async_complete_item(
+            original_name = item.uid.removeprefix("recent_")
+            success = await self.coordinator.async_complete_item(
                 self._list_uuid,
                 original_name,
             )
         else:
             # Update specification
-            original_name = item.uid.replace("recent_", "")
-            await self.coordinator.async_update_item(
+            original_name = item.uid.removeprefix("recent_")
+            success = await self.coordinator.async_update_item(
                 self._list_uuid,
                 original_name,
                 item.description or "",
             )
+        if not success:
+            raise HomeAssistantError(f"Failed to update {original_name} in Bring")
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete todo items."""
         for uid in uids:
-            original_name = uid.replace("recent_", "")
-            await self.coordinator.async_remove_item(
+            original_name = uid.removeprefix("recent_")
+            success = await self.coordinator.async_remove_item(
                 self._list_uuid,
                 original_name,
             )
+            if not success:
+                raise HomeAssistantError(f"Failed to remove {original_name} from Bring")
