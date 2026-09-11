@@ -18,7 +18,6 @@ WS_TYPE_GET_LISTS: Final = "bring_shopping/get_lists"
 WS_TYPE_GET_ITEMS: Final = "bring_shopping/get_items"
 WS_TYPE_ADD_ITEM: Final = "bring_shopping/add_item"
 WS_TYPE_COMPLETE_ITEM: Final = "bring_shopping/complete_item"
-WS_TYPE_REMOVE_ITEM: Final = "bring_shopping/remove_item"
 WS_TYPE_UPDATE_ITEM: Final = "bring_shopping/update_item"
 WS_TYPE_REORDER_ITEMS: Final = "bring_shopping/reorder_items"
 

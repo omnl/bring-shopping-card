@@ -21,7 +21,6 @@ from .const import (
     WS_TYPE_GET_ITEMS,
     WS_TYPE_GET_LISTS,
     WS_TYPE_REORDER_ITEMS,
-    WS_TYPE_REMOVE_ITEM,
     WS_TYPE_UPDATE_ITEM,
 )
 from .coordinator import BringDataUpdateCoordinator
@@ -43,7 +42,6 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_items)
     websocket_api.async_register_command(hass, ws_add_item)
     websocket_api.async_register_command(hass, ws_complete_item)
-    websocket_api.async_register_command(hass, ws_remove_item)
     websocket_api.async_register_command(hass, ws_update_item)
     websocket_api.async_register_command(hass, ws_reorder_items)
 
@@ -213,33 +211,6 @@ async def ws_complete_item(
         connection.send_result(msg["id"], {"success": True})
     else:
         connection.send_error(msg["id"], "failed", "Failed to complete item")
-
-
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): WS_TYPE_REMOVE_ITEM,
-        vol.Required(ATTR_LIST_UUID): str,
-        vol.Required(ATTR_ORIGINAL_NAME): str,
-    }
-)
-@websocket_api.async_response
-async def ws_remove_item(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Permanently remove an item from a Bring list."""
-    list_uuid = msg[ATTR_LIST_UUID]
-    coordinator = _coordinator_for_list(hass, list_uuid)
-    if not coordinator:
-        connection.send_error(msg["id"], "not_found", f"List {list_uuid} not found")
-        return
-
-    success = await coordinator.async_remove_item(list_uuid, msg[ATTR_ORIGINAL_NAME])
-    if success:
-        connection.send_result(msg["id"], {"success": True})
-    else:
-        connection.send_error(msg["id"], "failed", "Failed to remove item")
 
 
 @websocket_api.websocket_command(

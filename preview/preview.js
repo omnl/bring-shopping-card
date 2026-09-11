@@ -61,11 +61,6 @@ const hass = {
       if (index >= 0) list.recently.unshift(list.purchase.splice(index, 1)[0]);
       return { success: true };
     }
-    if (message.type === 'bring_shopping/remove_item') {
-      const index = list.purchase.findIndex(({ originalName }) => originalName === message.original_name);
-      if (index >= 0) list.purchase.splice(index, 1);
-      return { success: true };
-    }
     if (message.type === 'bring_shopping/update_item') {
       const current = list.purchase.find(({ originalName }) => originalName === message.original_name);
       if (current) current.specification = message.specification;

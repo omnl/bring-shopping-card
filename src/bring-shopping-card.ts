@@ -171,7 +171,14 @@ export class BringShoppingCard extends LitElement {
   @state() private _confirmClear = false;
 
   private _failedImages = new Set<string>();
+  private _pendingCompletions = new Set<string>();
+  private _pendingCompletionItems = new Map<string, BringItem>();
+  private _pendingAdditions = new Map<string, BringItem>();
+  private _pendingSpecifications = new Map<string, string>();
+  private _completionTimers = new Map<string, number>();
   private _refreshInterval?: number;
+  private _fetchSequence = 0;
+  private _suppressCardClickUntil = 0;
   // Stable per-card key for persisting state (selected list, sort, order).
   // Must NOT be random, or nothing survives a page reload. Set from config so
   // multiple cards on one dashboard can be disambiguated via `card_id`.
@@ -288,22 +295,78 @@ export class BringShoppingCard extends LitElement {
 
   private async _fetchItems(): Promise<void> {
     if (!this._selectedListUuid) return;
+    const listUuid = this._selectedListUuid;
+    const sequence = ++this._fetchSequence;
 
     try {
       const response = await this.hass.callWS<WsItemsResponse>({
         type: 'bring_shopping/get_items',
-        list_uuid: this._selectedListUuid,
+        list_uuid: listUuid,
       });
 
-      this._items = response.purchase;
-      this._recentItems = response.recently;
-      this._availableItems = response.available;
+      if (sequence !== this._fetchSequence || listUuid !== this._selectedListUuid) return;
+
+      const serverItemNames = new Set(response.purchase.map(item => item.originalName));
+      for (const key of [...this._pendingCompletions]) {
+        const itemName = key.slice(listUuid.length + 1);
+        const isConfirmed = !serverItemNames.has(itemName)
+          && response.recently.some(item => item.originalName === itemName)
+          && response.available.some(item => item.originalName === itemName);
+        if (key.startsWith(`${listUuid}:`) && isConfirmed) {
+          this._pendingCompletions.delete(key);
+          this._pendingCompletionItems.delete(key);
+          const timer = this._completionTimers.get(key);
+          if (timer) clearTimeout(timer);
+          this._completionTimers.delete(key);
+        }
+      }
+      let items = response.purchase.filter(
+        item => !this._pendingCompletions.has(`${listUuid}:${item.originalName}`)
+      );
+      const visibleItemNames = new Set(items.map(item => item.originalName));
+
+      for (const [key, item] of [...this._pendingAdditions]) {
+        if (!key.startsWith(`${listUuid}:`)) continue;
+        if (visibleItemNames.has(item.originalName)) {
+          this._pendingAdditions.delete(key);
+        } else {
+          items = [...items, item];
+        }
+      }
+
+      items = items.map(item => {
+        const key = `${listUuid}:${item.originalName}`;
+        const specification = this._pendingSpecifications.get(key);
+        if (specification === undefined) return item;
+        if (item.specification === specification) this._pendingSpecifications.delete(key);
+        return { ...item, specification };
+      });
+
+      let recently = response.recently.filter(
+        item => !this._pendingAdditions.has(`${listUuid}:${item.originalName}`)
+      );
+      let available = response.available.filter(
+        item => !this._pendingAdditions.has(`${listUuid}:${item.originalName}`)
+      );
+      for (const [key, item] of this._pendingCompletionItems) {
+        if (!key.startsWith(`${listUuid}:`)) continue;
+        if (!recently.some(current => current.originalName === item.originalName)) recently = [item, ...recently];
+        if (!available.some(current => current.originalName === item.originalName)) available = [item, ...available];
+      }
+
+      this._items = items;
+      this._recentItems = recently;
+      this._availableItems = available;
       this._loading = false;
       this._error = null;
     } catch (err) {
       console.error('Failed to fetch items:', err);
       this._loading = false;
-      this._error = this._t('failed_to_load_list');
+      if (this._items.length === 0) {
+        this._error = this._t('failed_to_load_list');
+      } else {
+        this._showToast(this._t('failed_to_load_list'), 'error');
+      }
     }
   }
 
@@ -377,13 +440,36 @@ export class BringShoppingCard extends LitElement {
 
   private async _addItem(name: string, originalName?: string, specification = ''): Promise<void> {
     if (!name.trim() || !this._selectedListUuid) return;
+    const listUuid = this._selectedListUuid;
+    const itemName = name.trim();
+    const canonicalName = originalName || itemName;
+    const pendingKey = `${listUuid}:${canonicalName}`;
+    if (this._pendingAdditions.has(pendingKey)) return;
+
+    const sourceAvailableItem = this._availableItems.find(item => item.originalName === canonicalName);
+    const sourceRecentItem = this._recentItems.find(item => item.originalName === canonicalName);
+    const sourceItem = sourceAvailableItem || sourceRecentItem;
+    const optimisticItem: BringItem = sourceItem
+      ? { ...sourceItem, name: itemName, specification }
+      : {
+          name: itemName,
+          originalName: canonicalName,
+          specification,
+          icon: '🛒',
+          imageUrl: null,
+          category: this._t('other'),
+        };
+    this._pendingAdditions.set(pendingKey, optimisticItem);
+    this._items = [...this._items, optimisticItem];
+    this._availableItems = this._availableItems.filter(item => item.originalName !== canonicalName);
+    this._recentItems = this._recentItems.filter(item => item.originalName !== canonicalName);
 
     try {
       await this.hass.callWS({
         type: 'bring_shopping/add_item',
-        list_uuid: this._selectedListUuid,
-        item_name: name.trim(),
-        original_name: originalName || name.trim(),
+        list_uuid: listUuid,
+        item_name: itemName,
+        original_name: canonicalName,
         specification,
       });
 
@@ -391,26 +477,64 @@ export class BringShoppingCard extends LitElement {
       await this._fetchItems();
     } catch (err) {
       console.error('Failed to add item:', err);
+      this._pendingAdditions.delete(pendingKey);
+      if (this._selectedListUuid === listUuid) {
+        this._items = this._items.filter(item => item.originalName !== canonicalName);
+        if (sourceAvailableItem && !this._availableItems.some(item => item.originalName === canonicalName)) {
+          this._availableItems = [...this._availableItems, sourceAvailableItem];
+        }
+        if (sourceRecentItem && !this._recentItems.some(item => item.originalName === canonicalName)) {
+          this._recentItems = [...this._recentItems, sourceRecentItem];
+        }
+      }
       this._showToast(this._t('failed_to_add'), 'error');
     }
   }
 
-  private async _completeItem(item: BringItem, element: HTMLElement): Promise<void> {
+  private async _completeItem(item: BringItem): Promise<void> {
     if (!this._selectedListUuid) return;
-    element.classList.add('completing');
+    const listUuid = this._selectedListUuid;
+    const pendingKey = `${listUuid}:${item.originalName}`;
+    if (this._pendingCompletions.has(pendingKey)) return;
+
+    const originalIndex = this._items.findIndex(current => current.originalName === item.originalName);
+    this._pendingCompletions.add(pendingKey);
+    this._pendingCompletionItems.set(pendingKey, item);
+    this._items = this._items.filter(current => current.originalName !== item.originalName);
+    if (!this._recentItems.some(current => current.originalName === item.originalName)) {
+      this._recentItems = [item, ...this._recentItems];
+    }
+    if (!this._availableItems.some(current => current.originalName === item.originalName)) {
+      this._availableItems = [item, ...this._availableItems];
+    }
+    this._showToast(this._t('done', { name: item.name }), 'success');
+
     try {
       await this.hass.callWS({
         type: 'bring_shopping/complete_item',
-        list_uuid: this._selectedListUuid,
+        list_uuid: listUuid,
         original_name: item.originalName,
       });
-      setTimeout(() => {
-        this._showToast(this._t('done', { name: item.name }), 'success');
+      // Keep stale coordinator reads from briefly restoring the item, then
+      // ask for the authoritative state once Bring has had time to settle.
+      const timer = window.setTimeout(() => {
+        this._pendingCompletions.delete(pendingKey);
+        this._pendingCompletionItems.delete(pendingKey);
+        this._completionTimers.delete(pendingKey);
         this._fetchItems();
-      }, 350);
+      }, 15000);
+      this._completionTimers.set(pendingKey, timer);
     } catch (err) {
       console.error('Failed to complete item:', err);
-      element.classList.remove('completing');
+      this._pendingCompletions.delete(pendingKey);
+      this._pendingCompletionItems.delete(pendingKey);
+      if (this._selectedListUuid === listUuid && !this._items.some(current => current.originalName === item.originalName)) {
+        this._items = [
+          ...this._items.slice(0, Math.max(0, originalIndex)),
+          item,
+          ...this._items.slice(Math.max(0, originalIndex)),
+        ];
+      }
       this._showToast(this._t('failed_to_complete'), 'error');
     }
   }
@@ -423,22 +547,64 @@ export class BringShoppingCard extends LitElement {
       return;
     }
     this._confirmClear = false;
-    try {
-      await Promise.all(this._items.map(item => this.hass.callWS({ type: 'bring_shopping/remove_item', list_uuid: this._selectedListUuid!, original_name: item.originalName })));
-      await this._fetchItems();
-    } catch (err) {
-      console.error('Failed to clear list:', err);
+    const listUuid = this._selectedListUuid;
+    const itemsToComplete = this._items;
+    itemsToComplete.forEach(item => {
+      const key = `${listUuid}:${item.originalName}`;
+      this._pendingCompletions.add(key);
+      this._pendingCompletionItems.set(key, item);
+    });
+    this._items = [];
+    this._recentItems = [
+      ...itemsToComplete.filter(item => !this._recentItems.some(current => current.originalName === item.originalName)),
+      ...this._recentItems,
+    ];
+    this._availableItems = [
+      ...itemsToComplete.filter(item => !this._availableItems.some(current => current.originalName === item.originalName)),
+      ...this._availableItems,
+    ];
+
+    const results = await Promise.allSettled(itemsToComplete.map(item => this.hass.callWS({
+      type: 'bring_shopping/complete_item',
+      list_uuid: listUuid,
+      original_name: item.originalName,
+    })));
+    const failedItems = itemsToComplete.filter((_, index) => results[index].status === 'rejected');
+    failedItems.forEach(item => {
+      const key = `${listUuid}:${item.originalName}`;
+      this._pendingCompletions.delete(key);
+      this._pendingCompletionItems.delete(key);
+    });
+
+    if (this._selectedListUuid === listUuid && failedItems.length) {
+      this._items = [...this._items, ...failedItems];
+      this._recentItems = this._recentItems.filter(
+        item => !failedItems.some(failed => failed.originalName === item.originalName)
+      );
+      this._availableItems = this._availableItems.filter(
+        item => !failedItems.some(failed => failed.originalName === item.originalName)
+      );
       this._showToast(this._t('failed_to_remove'), 'error');
     }
+    // The coordinator refresh runs in the background. Reading it immediately
+    // can return the pre-completion snapshot and visually undo the clear.
+    window.setTimeout(() => this._fetchItems(), 15000);
   }
 
   private async _updateItemSpec(item: BringItem, newSpec: string): Promise<void> {
     if (!this._selectedListUuid) return;
+    const listUuid = this._selectedListUuid;
+    const pendingKey = `${listUuid}:${item.originalName}`;
+    const previousSpec = item.specification;
+    this._pendingSpecifications.set(pendingKey, newSpec);
+    this._items = this._items.map(current =>
+      current.originalName === item.originalName ? { ...current, specification: newSpec } : current
+    );
 
     try {
       await this.hass.callWS({
         type: 'bring_shopping/update_item',
-        list_uuid: this._selectedListUuid,
+        list_uuid: listUuid,
         original_name: item.originalName,
         specification: newSpec,
       });
@@ -447,6 +613,12 @@ export class BringShoppingCard extends LitElement {
       await this._fetchItems();
     } catch (err) {
       console.error('Failed to update item:', err);
+      this._pendingSpecifications.delete(pendingKey);
+      if (this._selectedListUuid === listUuid) {
+        this._items = this._items.map(current =>
+          current.originalName === item.originalName ? { ...current, specification: previousSpec } : current
+        );
+      }
       this._showToast(this._t('failed_to_update'), 'error');
     }
   }
@@ -514,6 +686,7 @@ export class BringShoppingCard extends LitElement {
     this._draggedItem = item;
     (e.target as HTMLElement).classList.add('dragging');
     e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', item.originalName);
   }
 
   private _handleDragEnd(e: DragEvent): void {
@@ -522,6 +695,7 @@ export class BringShoppingCard extends LitElement {
       el.classList.remove('drag-over');
     });
     this._draggedItem = null;
+    this._suppressCardClickUntil = Date.now() + 250;
   }
 
   private _handleDragOver(e: DragEvent): void {
@@ -543,34 +717,32 @@ export class BringShoppingCard extends LitElement {
 
     if (!this._draggedItem || this._draggedItem.originalName === targetItem.originalName) return;
 
-    // Reorder in customOrder
-    const draggedIdx = this._customOrder.indexOf(this._draggedItem.originalName);
-    if (draggedIdx === -1) {
-      this._customOrder.push(this._draggedItem.originalName);
-    }
-
-    this._customOrder = this._customOrder.filter(n => n !== this._draggedItem!.originalName);
-    const newTargetIdx = this._customOrder.indexOf(targetItem.originalName);
-    this._customOrder.splice(newTargetIdx, 0, this._draggedItem.originalName);
+    const order = this._getSortedItems().map(item => item.originalName);
+    const draggedName = this._draggedItem.originalName;
+    const withoutDragged = order.filter(name => name !== draggedName);
+    const targetIndex = withoutDragged.indexOf(targetItem.originalName);
+    withoutDragged.splice(Math.max(0, targetIndex), 0, draggedName);
+    this._customOrder = withoutDragged;
 
     if (this._sortBy !== 'manual') {
       this._sortBy = 'manual';
     }
 
     this._saveState();
-    this.requestUpdate();
   }
 
   private _selectList(list: BringList): void {
     this._selectedListUuid = list.uuid;
     this._showListDropdown = false;
+    this._loading = true;
+    this._items = [];
     this._saveState();
     this._fetchItems();
   }
 
   private _renderImage(item: BringItem, size: 'large' | 'small'): TemplateResult {
     const imgClass = size === 'large' ? 'card-img' : 'quick-card-img';
-    const iconClass = size === 'large' ? 'card-icon' : 'quick-card-icon';
+    const initialClass = size === 'large' ? 'card-initial' : 'quick-card-initial';
 
     if (item.imageUrl && !this._failedImages.has(item.imageUrl)) {
       return html`
@@ -579,15 +751,13 @@ export class BringShoppingCard extends LitElement {
           src="${item.imageUrl}"
           alt="${item.name}"
           @error=${(e: Event) => {
-            (e.target as HTMLElement).style.display = 'none';
-            (e.target as HTMLElement).nextElementSibling?.removeAttribute('style');
             this._failedImages.add(item.imageUrl!);
+            this.requestUpdate();
           }}
         />
-        <span class="${iconClass}" style="display:none">${item.icon || '🛒'}</span>
       `;
     }
-    return html`<span class="${iconClass}">${item.icon || '🛒'}</span>`;
+    return html`<span class="${initialClass}" aria-hidden="true">${item.name.trim().charAt(0).toUpperCase() || '?'}</span>`;
   }
 
   private _renderHeader(): TemplateResult {
@@ -688,7 +858,11 @@ export class BringShoppingCard extends LitElement {
               e.stopPropagation();
               const btn = e.currentTarget as HTMLElement;
               btn.classList.add('spinning');
-              await this._fetchItems();
+              if (this._lists.length === 0) {
+                await this._fetchLists();
+              } else {
+                await this._fetchItems();
+              }
               btn.classList.remove('spinning');
             }}
             title=${this._t('refresh')}
@@ -731,15 +905,13 @@ export class BringShoppingCard extends LitElement {
                           class="suggestion-img"
                           src="${item.imageUrl}"
                           alt=""
-                          @error=${(e: Event) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                            (e.target as HTMLElement).nextElementSibling?.removeAttribute('style');
+                          @error=${() => {
                             this._failedImages.add(item.imageUrl!);
+                            this.requestUpdate();
                           }}
                         />
-                        <span class="suggestion-icon" style="display:none">${item.icon}</span>
                       `
-                    : html`<span class="suggestion-icon">${item.icon}</span>`}
+                    : html`<span class="suggestion-initial" aria-hidden="true">${item.name.trim().charAt(0).toUpperCase() || '?'}</span>`}
                   <span class="suggestion-text">${item.name}</span>
                   ${item.category ? html`<span class="suggestion-category">${item.category}</span>` : nothing}
                 </div>
@@ -794,7 +966,9 @@ export class BringShoppingCard extends LitElement {
                     <div
                       class="card"
                       draggable="true"
-                      @click=${(e: Event) => this._completeItem(item, e.currentTarget as HTMLElement)}
+                      @click=${() => {
+                        if (Date.now() >= this._suppressCardClickUntil) this._completeItem(item);
+                      }}
                       @dragstart=${(e: DragEvent) => this._handleDragStart(e, item)}
                       @dragend=${this._handleDragEnd}
                       @dragover=${this._handleDragOver}

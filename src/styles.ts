@@ -26,6 +26,8 @@ export const cardStyles = css`
     --bring-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
     --bring-radius: var(--ha-card-border-radius, 14px);
     --bring-radius-sm: 10px;
+    --bring-item-active: #f45158;
+    --bring-item-selectable: #56b3ae;
 
     display: block;
     font-family: var(--paper-font-body1_-_font-family, 'Roboto', sans-serif);
@@ -500,10 +502,10 @@ export const cardStyles = css`
   }
 
   .card {
-    background: var(--bring-bg-card);
+    background: var(--bring-item-active);
     border-radius: var(--bring-radius-sm);
     padding: var(--bring-card-padding, 8px 6px);
-    border: 1px solid var(--bring-border);
+    border: 1px solid var(--bring-item-active);
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
@@ -547,8 +549,8 @@ export const cardStyles = css`
   }
 
   .card:hover {
-    background: var(--bring-bg-hover);
-    border-color: var(--bring-accent);
+    background: #e94149;
+    border-color: #e94149;
     transform: translateY(-2px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   }
@@ -586,7 +588,7 @@ export const cardStyles = css`
     height: 28px;
     object-fit: contain;
     margin-bottom: 5px;
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+    filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.16));
   }
 
   .card-icon {
@@ -594,6 +596,24 @@ export const cardStyles = css`
     margin-bottom: 5px;
     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
   }
+
+  .card-initial,
+  .quick-card-initial,
+  .suggestion-initial {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .card-initial { width: 28px; height: 28px; font-size: 24px; }
+  .quick-card-initial { width: 28px; height: 28px; margin-bottom: 6px; font-size: 22px; }
+  .suggestion-initial { width: 28px; height: 28px; flex-shrink: 0; font-size: 20px; color: var(--bring-text-primary); }
+
+  :host([data-size="small"]) .card-initial { width: 24px; height: 24px; font-size: 20px; }
+  :host([data-size="large"]) .card-initial { width: 40px; height: 40px; font-size: 32px; }
 
 
   .card-row {
@@ -622,7 +642,7 @@ export const cardStyles = css`
   .card-name {
     font-weight: 600;
     font-size: 10px;
-    color: var(--bring-text-primary);
+    color: #ffffff;
     line-height: 1.2;
     max-height: 2.4em;
     overflow: hidden;
@@ -636,7 +656,7 @@ export const cardStyles = css`
 
   .card-spec {
     font-size: 10px;
-    color: var(--bring-accent);
+    color: rgba(255, 255, 255, 0.9);
     margin-top: 3px;
     cursor: pointer;
     padding: 2px 0;
@@ -649,15 +669,15 @@ export const cardStyles = css`
   }
 
   .card-spec.empty {
-    color: var(--bring-text-muted);
+    color: rgba(255, 255, 255, 0.8);
     opacity: 1;
   }
 
   .card-category {
     margin-top: 3px;
     font-size: 8px;
-    color: var(--bring-text-muted);
-    background: var(--bring-bg-tertiary);
+    color: #ffffff;
+    background: rgba(0, 0, 0, 0.14);
     padding: 2px 6px;
     border-radius: 4px;
     white-space: nowrap;
@@ -674,10 +694,10 @@ export const cardStyles = css`
   }
 
   .quick-card {
-    background: var(--bring-bg-secondary);
+    background: var(--bring-item-selectable);
     border-radius: var(--bring-radius-sm);
     padding: 10px 8px;
-    border: 1px solid var(--bring-border);
+    border: 1px solid var(--bring-item-selectable);
     cursor: pointer;
     transition: all 0.2s ease;
     display: flex;
@@ -687,8 +707,8 @@ export const cardStyles = css`
   }
 
   .quick-card:hover {
-    background: var(--bring-bg-hover);
-    border-color: var(--bring-accent);
+    background: #459e99;
+    border-color: #459e99;
     transform: translateY(-2px);
   }
 
@@ -711,6 +731,7 @@ export const cardStyles = css`
     height: 28px;
     object-fit: contain;
     margin-bottom: 6px;
+    filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.12));
   }
 
   .quick-card-icon {
@@ -721,7 +742,7 @@ export const cardStyles = css`
   .quick-card-name {
     font-size: 10px;
     font-weight: 500;
-    color: var(--bring-text-secondary);
+    color: #ffffff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

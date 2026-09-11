@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import logging
+from urllib.parse import quote
 
 from .const import BRING_CDN_BASE
 from .translations_data import (
@@ -76,9 +77,12 @@ def get_image_url(item_name: str) -> str | None:
     if not item_name:
         return None
 
-    # The CDN uses lowercase names
-    clean_name = item_name.lower()
-    return f"{BRING_CDN_BASE}{clean_name}.png"
+    # Bring's CDN uses ASCII German item ids (e.g. ``kaese.png``, not
+    # ``käse.png``). Quote remaining characters such as spaces safely.
+    clean_name = item_name.lower().translate(
+        str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+    )
+    return f"{BRING_CDN_BASE}{quote(clean_name, safe='')}.png"
 
 
 def get_icon_for_item(

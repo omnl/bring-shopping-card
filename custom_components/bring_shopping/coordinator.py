@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for the Bring! Shopping Card integration."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
@@ -19,6 +20,7 @@ from .helpers import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+MUTATION_REFRESH_DELAY = 15
 
 
 @dataclass
@@ -68,6 +70,25 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         )
         self.bring = bring
         self._lists_info: list[BringList] = []
+        self._mutation_refresh_task: asyncio.Task[None] | None = None
+
+    def _schedule_mutation_refresh(self) -> None:
+        """Coalesce mutation refreshes into one delayed account sync."""
+        if self._mutation_refresh_task and not self._mutation_refresh_task.done():
+            return
+        self._mutation_refresh_task = self.hass.async_create_task(
+            self._async_refresh_after_mutations()
+        )
+
+    async def _async_refresh_after_mutations(self) -> None:
+        """Synchronize after a quiet mutation window without blocking commands."""
+        try:
+            await asyncio.sleep(MUTATION_REFRESH_DELAY)
+            await self.async_request_refresh()
+        except Exception as err:  # noqa: BLE001 - keep background refresh failures isolated
+            _LOGGER.warning("Delayed Bring refresh failed: %s", err)
+        finally:
+            self._mutation_refresh_task = None
 
     async def _async_update_data(self) -> BringData:
         """Fetch data from Bring API."""
@@ -164,7 +185,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
 
             icon_item_id = detail.userIconItemId if detail else item_id
             category = detail.userSectionId if detail else ""
-            image_url = detail.imageUrl if detail and detail.imageUrl else get_image_url(icon_item_id or item_id)
+            image_url = get_image_url(icon_item_id or item_id)
 
             purchase_items.append(
                 BringItem(
@@ -185,7 +206,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
 
             icon_item_id = detail.userIconItemId if detail else item_id
             category = detail.userSectionId if detail else ""
-            image_url = detail.imageUrl if detail and detail.imageUrl else get_image_url(icon_item_id or item_id)
+            image_url = get_image_url(icon_item_id or item_id)
 
             recently_items.append(
                 BringItem(
@@ -209,7 +230,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
                 seen.add(item_id)
                 category = detail.userSectionId
                 icon_item_id = detail.userIconItemId or item_id
-                image_url = detail.imageUrl if detail.imageUrl else get_image_url(icon_item_id)
+                image_url = get_image_url(icon_item_id)
 
                 available_items.append(
                     BringItem(
@@ -253,7 +274,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         """Add an item to a shopping list."""
         try:
             await self.bring.save_item(list_uuid, item_name, specification)
-            await self.async_request_refresh()
+            self._schedule_mutation_refresh()
             return True
         except Exception as err:
             _LOGGER.error("Failed to add item %s: %s", item_name, err)
@@ -267,7 +288,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         """Mark an item as completed (move to recently)."""
         try:
             await self.bring.complete_item(list_uuid, item_name)
-            self.hass.async_create_task(self.async_request_refresh())
+            self._schedule_mutation_refresh()
             return True
         except Exception as err:
             _LOGGER.error("Failed to complete item %s: %s", item_name, err)
@@ -283,7 +304,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         try:
             # save_item with same name updates the specification
             await self.bring.save_item(list_uuid, item_name, specification)
-            await self.async_request_refresh()
+            self._schedule_mutation_refresh()
             return True
         except Exception as err:
             _LOGGER.error("Failed to update item %s: %s", item_name, err)
@@ -297,7 +318,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         """Remove an item from the list."""
         try:
             await self.bring.remove_item(list_uuid, item_name)
-            await self.async_request_refresh()
+            self._schedule_mutation_refresh()
             return True
         except Exception as err:
             _LOGGER.error("Failed to remove item %s: %s", item_name, err)
