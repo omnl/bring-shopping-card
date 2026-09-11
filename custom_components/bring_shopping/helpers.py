@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import logging
+import re
 from urllib.parse import quote
 
 from .const import BRING_CDN_BASE
@@ -77,11 +78,15 @@ def get_image_url(item_name: str) -> str | None:
     if not item_name:
         return None
 
-    # Bring's CDN uses ASCII German item ids (e.g. ``kaese.png``, not
-    # ``käse.png``). Quote remaining characters such as spaces safely.
+    # Bring's CDN uses normalized ASCII ids: umlauts are expanded and word
+    # separators become underscores (e.g. ``Käse`` -> ``kaese.png`` and
+    # ``WC-Papier`` -> ``wc_papier.png``).
     clean_name = item_name.lower().translate(
         str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
     )
+    clean_name = re.sub(r"[^a-z0-9]+", "_", clean_name).strip("_")
+    if not clean_name:
+        return None
     return f"{BRING_CDN_BASE}{quote(clean_name, safe='')}.png"
 
 

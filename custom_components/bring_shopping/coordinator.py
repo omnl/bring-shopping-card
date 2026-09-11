@@ -18,6 +18,7 @@ from bring_api import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .catalog_data import CATALOG_ITEMS
 from .const import DOMAIN, UPDATE_INTERVAL
 from .helpers import (
     load_section_translations,
@@ -30,6 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 MUTATION_REFRESH_DELAY = 15
 PENDING_MUTATION_TTL = 35
 MUTATION_TIMEOUT = 20
+LIVE_REFRESH_MIN_INTERVAL = 5
 
 
 @dataclass
@@ -92,6 +94,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         self._mutation_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._pending_mutations: dict[tuple[str, str], PendingMutation] = {}
         self._refresh_lock = asyncio.Lock()
+        self._last_list_refresh: dict[str, float] = {}
 
     def _mutation_lock(self, list_uuid: str, item_name: str) -> asyncio.Lock:
         """Preserve order for one item without blocking unrelated items."""
@@ -301,7 +304,11 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         )
 
     async def _fetch_list_data(
-        self, list_uuid: str, list_name: str
+        self,
+        list_uuid: str,
+        list_name: str,
+        *,
+        include_details: bool = True,
     ) -> BringListData:
         """Fetch data for a single list."""
         # Get items
@@ -317,18 +324,19 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         # Get all item details (for images and categories). These are optional
         # enrichment; if they fail to load or parse we still show the list with
         # its items rather than dropping everything.
-        try:
-            details_response = await self.bring.get_all_item_details(list_uuid)
-            details_items = details_response.items
-        except Exception as err:
-            _LOGGER.warning(
-                "Failed to fetch item details for list %s (%s); "
-                "showing items without images/categories: %s",
-                list_name,
-                list_uuid,
-                err,
-            )
-            details_items = []
+        details_items = []
+        if include_details:
+            try:
+                details_response = await self.bring.get_all_item_details(list_uuid)
+                details_items = details_response.items
+            except Exception as err:
+                _LOGGER.warning(
+                    "Failed to fetch item details for list %s (%s); "
+                    "showing items without images/categories: %s",
+                    list_name,
+                    list_uuid,
+                    err,
+                )
         details_map = {d.itemId: d for d in details_items}
         previous = self.data.lists.get(list_uuid) if self.data else None
         cached_items = {
@@ -401,13 +409,15 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
 
         # Process available items (all known items not in purchase)
         purchase_names = {item.itemId for item in items_response.items.purchase}
+        purchase_keys = {name.casefold() for name in purchase_names}
         available_items = []
-        seen = set()
+        seen: set[str] = set()
 
         for detail in details_items:
             item_id = detail.itemId
-            if item_id and item_id not in seen and item_id not in purchase_names:
-                seen.add(item_id)
+            item_key = item_id.casefold() if item_id else ""
+            if item_id and item_key not in seen and item_key not in purchase_keys:
+                seen.add(item_key)
                 category = detail.userSectionId
                 icon_item_id = detail.userIconItemId or item_id
                 image_url = get_image_url(icon_item_id)
@@ -423,11 +433,36 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
                     )
                 )
 
+        # The Bring details endpoint only returns articles known to the
+        # account. Add the built-in catalog so every standard article remains
+        # selectable even when it has never been used on this list.
+        for canonical_category, canonical_name, image_id in CATALOG_ITEMS:
+            item_name = sections.get(canonical_name, canonical_name)
+            item_key = item_name.casefold()
+            if item_key in seen or item_key in purchase_keys:
+                continue
+            seen.add(item_key)
+            available_items.append(
+                BringItem(
+                    name=item_name,
+                    original_name=item_name,
+                    specification="",
+                    icon=get_icon_for_item(
+                        item_name,
+                        canonical_name,
+                        canonical_category,
+                    ),
+                    image_url=get_image_url(image_id),
+                    category=translate_section(canonical_category, sections),
+                )
+            )
+
         if not details_items and previous:
             for cached in [*previous.available, *previous.recently]:
-                if cached.original_name in seen or cached.original_name in purchase_names:
+                cached_key = cached.original_name.casefold()
+                if cached_key in seen or cached_key in purchase_keys:
                     continue
-                seen.add(cached.original_name)
+                seen.add(cached_key)
                 available_items.append(cached)
 
         # Sort available by category
@@ -457,7 +492,7 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         return any(item.listUuid == list_uuid for item in self._lists_info)
 
     async def async_refresh_list(self, list_uuid: str) -> bool:
-        """Fetch one list from Bring and publish it without refreshing all accounts."""
+        """Quickly fetch one list without reloading its presentation metadata."""
         current = self.data.lists.get(list_uuid) if self.data else None
         list_info = next(
             (item for item in self._lists_info if item.listUuid == list_uuid),
@@ -468,13 +503,21 @@ class BringDataUpdateCoordinator(DataUpdateCoordinator[BringData]):
         list_name = current.name if current else list_info.name
         try:
             async with self._refresh_lock:
+                last_refresh = self._last_list_refresh.get(list_uuid, 0)
+                if monotonic() - last_refresh < LIVE_REFRESH_MIN_INTERVAL:
+                    return True
                 async with asyncio.timeout(MUTATION_TIMEOUT):
-                    fresh = await self._fetch_list_data(list_uuid, list_name)
+                    fresh = await self._fetch_list_data(
+                        list_uuid,
+                        list_name,
+                        include_details=False,
+                    )
                 merged = self._apply_pending_mutations(
                     BringData(lists={list_uuid: fresh}),
                     {list_uuid},
                 )
                 self._set_list_data(merged.lists[list_uuid])
+                self._last_list_refresh[list_uuid] = monotonic()
             return True
         except Exception as err:
             _LOGGER.warning("Failed to refresh list %s: %s", list_uuid, err)

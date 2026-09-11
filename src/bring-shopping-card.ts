@@ -177,6 +177,7 @@ export class BringShoppingCard extends LitElement {
   private _pendingSpecifications = new Map<string, string>();
   private _refreshInterval?: number;
   private _fetchSequence = 0;
+  private _cloudRefreshes = new Set<string>();
   private _suppressCardClickUntil = 0;
   // Stable per-card key for persisting state (selected list, sort, order).
   // Must NOT be random, or nothing survives a page reload. Set from config so
@@ -325,6 +326,8 @@ export class BringShoppingCard extends LitElement {
   private async _fetchItems(forceCloud = false): Promise<void> {
     if (!this._selectedListUuid) return;
     const listUuid = this._selectedListUuid;
+    if (forceCloud && this._cloudRefreshes.has(listUuid)) return;
+    if (forceCloud) this._cloudRefreshes.add(listUuid);
     const sequence = ++this._fetchSequence;
 
     try {
@@ -387,6 +390,8 @@ export class BringShoppingCard extends LitElement {
       } else {
         this._showToast(this._t('failed_to_load_list'), 'error');
       }
+    } finally {
+      if (forceCloud) this._cloudRefreshes.delete(listUuid);
     }
   }
 
@@ -394,9 +399,9 @@ export class BringShoppingCard extends LitElement {
     if (this._refreshInterval) return;
     this._refreshInterval = window.setInterval(() => {
       if (!document.hidden) {
-        this._fetchItems();
+        this._fetchItems(true);
       }
-    }, 60000);
+    }, 10000);
   }
 
   private _stopAutoRefresh(): void {
